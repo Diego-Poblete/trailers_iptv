@@ -5,7 +5,7 @@ Este directorio se publica **solo** en un repositorio GitHub independiente. Nunc
 ## Preparación
 
 1. Crea un repositorio nuevo para este directorio y sube **su contenido** a la rama principal.
-2. En GitHub, abre **Settings → Secrets and variables → Actions** y crea `IPTV_SERVER`, `IPTV_USERNAME`, `IPTV_PASSWORD`. `TMDB_BEARER` es opcional para encontrar tráilers faltantes. Ingresa los valores solo en GitHub; no los pongas en archivos ni mensajes.
+2. En GitHub, abre **Settings → Secrets and variables → Actions** y crea `IPTV_SERVER`, `IPTV_USERNAME`, `IPTV_PASSWORD`. `IPTV_SERVER` debe ser solo la raíz `http(s)://servidor:puerto`, sin `/get.php`, parámetros ni credenciales. `TMDB_BEARER` es opcional para encontrar tráilers faltantes. Ingresa los valores solo en GitHub; no los pongas en archivos ni mensajes.
 3. En **Settings → Pages → Build and deployment**, selecciona **GitHub Actions**.
 4. En **Actions → Update trailer index → Run workflow**, ejecútalo una vez. Después se ejecuta diariamente a las 06:17 UTC. La hora exacta puede variar por la cola de GitHub Actions.
 5. Comprueba `https://Diego-Poblete.github.io/trailers_iptv/trailers.json`. LG y Roku ya apuntan a esta URL pública. Si cambias de repositorio, ajusta `APP LG/trailer-feed.js` y `APP Roku/source/Config.brs`.
