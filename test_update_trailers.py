@@ -52,6 +52,21 @@ class TrailerIndexTests(unittest.TestCase):
                 self.assertNotIn("secret-password", payload)
                 self.assertNotIn("private.example", payload)
 
+    def test_tmdb_fallback_uses_exact_series_match_and_official_trailer(self):
+        def fake_tmdb(path, bearer, **params):
+            if path == "search/tv":
+                return {"results": [{"id": 42, "name": "La ruta", "first_air_date": "2025-01-01"}]}
+            if path == "tv/42/videos":
+                return {"results": [
+                    {"site": "YouTube", "type": "Trailer", "key": "abcdefghijk", "official": False},
+                    {"site": "YouTube", "type": "Trailer", "key": "lmnopqrstuv", "official": True},
+                ]}
+            raise AssertionError("Unexpected TMDB call")
+
+        with patch.object(updater, "tmdb_request", side_effect=fake_tmdb):
+            video = updater.tmdb_video("series", {"name": "La ruta (2025)", "year": "2025"}, {}, "dummy-token")
+        self.assertEqual(video, "lmnopqrstuv")
+
 
 if __name__ == "__main__":
     unittest.main()
