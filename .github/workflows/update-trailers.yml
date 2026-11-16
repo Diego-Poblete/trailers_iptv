@@ -37,7 +37,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/trailers.json docs/trailers.js state/trailer-state.json
+          git add docs/trailers.json state/trailer-state.json
           if ! git diff --cached --quiet; then
             git commit -m "Update public trailer index"
             git push

@@ -15,6 +15,7 @@ class TrailerIndexTests(unittest.TestCase):
     def test_youtube_ids_and_rejected_hosts(self):
         self.assertEqual(updater.youtube_id("https://youtu.be/abcdefghijk"), "abcdefghijk")
         self.assertEqual(updater.youtube_id("https://www.youtube.com/watch?v=abcdefghijk"), "abcdefghijk")
+        self.assertEqual(updater.youtube_id("https://www.youtube.com/embed/abcdefghijk"), "abcdefghijk")
         self.assertEqual(updater.youtube_id("https://youtube.com.evil.test/watch?v=abcdefghijk"), "")
 
     def test_index_is_bounded_and_contains_no_private_data(self):
@@ -37,7 +38,6 @@ class TrailerIndexTests(unittest.TestCase):
                 return responses[action]
 
             with patch.object(updater, "OUTPUT", root / "docs" / "trailers.json"), \
-                 patch.object(updater, "SCRIPT_OUTPUT", root / "docs" / "trailers.js"), \
                  patch.object(updater, "STATE", root / "state" / "trailer-state.json"), \
                  patch.object(updater, "request_json", side_effect=fake_request):
                 updater.update("https://private.example", "secret-user", "secret-password", batch_size=2)
@@ -46,11 +46,11 @@ class TrailerIndexTests(unittest.TestCase):
                 data = json.loads(payload)
                 self.assertEqual(data["movies"]["5"]["youtube"], "abcdefghijk")
                 self.assertEqual(data["series"]["7"]["youtube"], "lmnopqrstuv")
+                self.assertEqual(len(data["movies"]), 2)
                 self.assertNotIn("Private title", payload)
                 self.assertNotIn("secret-user", payload)
                 self.assertNotIn("secret-password", payload)
                 self.assertNotIn("private.example", payload)
-                self.assertTrue((root / "docs" / "trailers.js").read_text().startswith("window.POBLETE_TRAILER_FEED="))
 
 
 if __name__ == "__main__":

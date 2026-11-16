@@ -18,22 +18,29 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "docs" / "trailers.json"
-SCRIPT_OUTPUT = ROOT / "docs" / "trailers.js"
 STATE = ROOT / "state" / "trailer-state.json"
 YOUTUBE_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 RECHECK_FOUND_DAYS = 30
 RECHECK_MISSING_DAYS = 14
 
 
+class ApiError(RuntimeError):
+    def __init__(self, status):
+        self.status = status
+        super().__init__("Remote API returned HTTP %s" % status)
+
+
 def request_json(url, headers=None):
-    request = urllib.request.Request(url, headers=headers or {"Accept": "application/json"})
+    request_headers = {"Accept": "application/json", "User-Agent": "Poblete-IPTV-trailer-index/1.0"}
+    request_headers.update(headers or {})
+    request = urllib.request.Request(url, headers=request_headers)
     for attempt in range(3):
         try:
             with urllib.request.urlopen(request, timeout=25) as response:
                 return json.load(response)
         except urllib.error.HTTPError as error:
             if error.code != 429 or attempt == 2:
-                raise RuntimeError("Remote API returned HTTP %s" % error.code) from None
+                raise ApiError(error.code) from None
             time.sleep(2 ** attempt + 1)
         except (urllib.error.URLError, TimeoutError, ValueError):
             if attempt == 2:
@@ -50,7 +57,7 @@ def youtube_id(value):
         host = (url.hostname or "").lower()
         if host in ("youtube.com", "www.youtube.com", "m.youtube.com"):
             candidate = urllib.parse.parse_qs(url.query).get("v", [""])[0]
-            if not candidate and url.path.startswith("/shorts/"):
+            if not candidate and url.path.startswith(("/shorts/", "/embed/")):
                 candidate = url.path.split("/")[2]
         elif host in ("youtu.be", "www.youtu.be"):
             candidate = url.path.strip("/").split("/")[0]
@@ -95,6 +102,18 @@ def normalized_title(value):
     return re.sub(r"[^a-z0-9]+", "", value.casefold())
 
 
+def search_title(value):
+    value = re.sub(r"\s*\(\d{4}\).*", "", str(value or ""))
+    return re.sub(r"^(?:\d+\s*[-.]\s*|(?:VOD|SERIES?)\s+)", "", value, flags=re.I).strip()
+
+
+def safe_integer(value):
+    try:
+        return int(value or 0)
+    except (ValueError, TypeError):
+        return 0
+
+
 def tmdb_video(kind, item, info, bearer):
     if not bearer:
         return ""
@@ -102,8 +121,8 @@ def tmdb_video(kind, item, info, bearer):
     tmdb_id = info.get("tmdb_id") or item.get("tmdb_id")
     if kind == "series" and not tmdb_id:
         title = str(item.get("name") or "")
-        year = str(item.get("releaseDate") or item.get("year") or "")[:4]
-        params = {"query": title}
+        year = str(item.get("releaseDate") or item.get("release_date") or item.get("year") or "")[:4]
+        params = {"query": search_title(title)}
         if year.isdigit():
             params["first_air_date_year"] = year
         results = tmdb_request("search/tv", bearer, **params).get("results") or []
@@ -146,10 +165,12 @@ def update(server, username, password, bearer="", batch_size=250):
     data = load_previous()
     budget = batch_size
     discovered = 0
+    unavailable = 0
     for kind, action, id_field, detail_action, detail_field in (
         ("movies", "get_vod_streams", "stream_id", "get_vod_info", "vod_id"),
         ("series", "get_series", "series_id", "get_series_info", "series_id"),
     ):
+        section_checked = 0
         items = request_json(api_url(server, username, password, action))
         if not isinstance(items, list):
             raise RuntimeError("Provider catalog response has an unexpected shape")
@@ -159,17 +180,28 @@ def update(server, username, password, bearer="", batch_size=250):
             if stale not in valid:
                 del records[stale]
         items = [item for item in items if isinstance(item, dict)]
-        items.sort(key=lambda item: int(item.get("added") or item.get("last_modified") or 0), reverse=True)
+        items.sort(key=lambda item: safe_integer(item.get("added") or item.get("last_modified")), reverse=True)
         for item in items:
-            if budget <= 0:
+            if budget <= 0 or (kind == "movies" and section_checked >= (batch_size + 1) // 2):
                 break
             item_id = str(item.get(id_field) or "")
             if not item_id or not due(records.get(item_id), today):
                 continue
-            detail = request_json(api_url(server, username, password, detail_action, **{detail_field: item_id}))
+            try:
+                detail = request_json(api_url(server, username, password, detail_action, **{detail_field: item_id}))
+            except ApiError as error:
+                if error.status != 404:
+                    raise
+                records[item_id] = {"youtube": "", "source": "", "checked": today.isoformat()}
+                budget -= 1
+                section_checked += 1
+                unavailable += 1
+                continue
             info = detail.get("info") if isinstance(detail, dict) else None
             info = info if isinstance(info, dict) else {}
-            video = provider_video(info)
+            movie_data = detail.get("movie_data") if isinstance(detail, dict) else None
+            movie_data = movie_data if isinstance(movie_data, dict) else {}
+            video = provider_video(info) or provider_video(movie_data)
             source = "provider" if video else ""
             if not video and bearer:
                 try:
@@ -179,6 +211,7 @@ def update(server, username, password, bearer="", batch_size=250):
                     pass
             records[item_id] = {"youtube": video, "source": source, "checked": today.isoformat()}
             budget -= 1
+            section_checked += 1
             discovered += bool(video)
     data["updated"] = today.isoformat()
     STATE.parent.mkdir(parents=True, exist_ok=True)
@@ -190,8 +223,8 @@ def update(server, username, password, bearer="", batch_size=250):
                         for item_id, row in data[kind].items() if row.get("youtube")}
     payload = json.dumps(public, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     OUTPUT.write_text(payload + "\n", encoding="utf-8")
-    SCRIPT_OUTPUT.write_text("window.POBLETE_TRAILER_FEED=" + payload + ";\n", encoding="utf-8")
-    print("Checked %s titles; found %s trailers; remaining daily budget %s." % (batch_size - budget, discovered, budget))
+    print("Checked %s titles; found %s trailers; unavailable details %s; remaining daily budget %s." %
+          (batch_size - budget, discovered, unavailable, budget))
 
 
 if __name__ == "__main__":
