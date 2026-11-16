@@ -39,7 +39,7 @@ def request_json(url, headers=None):
             with urllib.request.urlopen(request, timeout=25) as response:
                 return json.load(response)
         except urllib.error.HTTPError as error:
-            if error.code != 429 or attempt == 2:
+            if error.code not in (429, 500, 502, 503, 504) or attempt == 2:
                 raise ApiError(error.code) from None
             time.sleep(2 ** attempt + 1)
         except (urllib.error.URLError, TimeoutError, ValueError):
