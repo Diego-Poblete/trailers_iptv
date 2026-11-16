@@ -27,6 +27,8 @@ jobs:
         with:
           python-version: '3.12'
       - name: Update index
+        id: update
+        continue-on-error: true
         env:
           IPTV_SERVER: ${{ secrets.IPTV_SERVER }}
           IPTV_USERNAME: ${{ secrets.IPTV_USERNAME }}
@@ -48,3 +50,6 @@ jobs:
           path: docs
       - id: deployment
         uses: actions/deploy-pages@v4
+      - name: Report provider failure after deploying last valid index
+        if: steps.update.outcome == 'failure'
+        run: exit 1
